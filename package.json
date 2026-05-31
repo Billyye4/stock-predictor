@@ -1,0 +1,26 @@
+{
+  "name": "stock-predictor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start:backend": "cd backend && venv\\Scripts\\python.exe -m uvicorn main:app --reload",
+    "start:frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run start:backend\" \"npm run start:frontend\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Billyye4/stock-predictor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Billyye4/stock-predictor/issues"
+  },
+  "homepage": "https://github.com/Billyye4/stock-predictor#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.0"
+  }
+}
