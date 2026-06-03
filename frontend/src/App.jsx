@@ -1,51 +1,86 @@
 import { useState, useEffect } from 'react'
+// 1. Import the Recharts components
+import { 
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+} from 'recharts'
 
 function App() {
-  // 1. Set up our state variables to hold the data and track loading status
-  const [signalData, setSignalData] = useState(null)
+  const [chartData, setChartData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  
+  // NEW: State for the search bar
+  const [searchInput, setSearchInput] = useState('NVDA') 
+  const [activeTicker, setActiveTicker] = useState('NVDA')
 
-  // 2. useEffect runs automatically when the page first loads
+  // Notice the [activeTicker] at the very end. This tells React: 
+  // "Whenever activeTicker changes, run this fetch again!"
   useEffect(() => {
-    // We are reaching out to the FastAPI server running on port 8000
-    // Testing this out with the KWEB ticker
-    fetch('http://localhost:8000/api/v1/signals/KWEB')
-      .then(response => response.json())
-      .then(data => {
-        setSignalData(data) // Save the JSON data to our state
-        setLoading(false)   // Turn off the loading screen
+    setLoading(true) // Turn the loading screen back on when searching
+    setError(null)   // Clear any old errors
+    
+    // We use backticks (`) here to inject the activeTicker variable into the URL
+    fetch(`http://localhost:8000/api/v1/chart/${activeTicker}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Server responded with status: ${response.status}`)
+        }
+        return response.json()
       })
-      .catch(error => {
-        console.error("Error connecting to FastAPI:", error)
+      .then(data => {
+        setChartData(data)
         setLoading(false)
       })
-  }, [])
+      .catch(err => {
+        console.error("Fetch error:", err)
+        setError(err.message)
+        setLoading(false)
+      })
+  }, [activeTicker]) // <--- CRITICAL: This dependency array is what triggers the reload
 
-  // 3. What to show while we wait for the backend to respond
-  if (loading) {
-    return (
-      <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
-        <h2>Connecting to Backend...</h2>
-      </div>
-    )
-  }
+  if (loading) return <h2 style={{ padding: '20px' }}>Loading Live Market Data...</h2>
+  if (error) return <h2 style={{ padding: '20px', color: 'red' }}>Error: {error}</h2>
 
-  // 4. What to show once the data successfully arrives
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '1000px', margin: '0 auto', color: '#fff' }}>
       <h1>Stock Predictor Dashboard</h1>
-      <hr />
-      <h2>Ticker: {signalData.ticker}</h2>
+      <hr style={{ marginBottom: '30px', borderColor: '#333' }} />
       
-      <div style={{ background: '#f0f0f0', padding: '15px', borderRadius: '8px', maxWidth: '400px' }}>
-        <p><strong>Overall Signal:</strong> {signalData.overall_signal}</p>
-        <p><strong>AI Confidence:</strong> {signalData.confidence_level * 100}%</p>
-        <p><strong>RSI (14):</strong> {signalData.indicators.rsi_14}</p>
+      {/* --- NEW SEARCH BAR UI --- */}
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '10px' }}>
+        <input 
+          type="text" 
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
+          placeholder="Enter Ticker (e.g. AAPL)"
+          style={{ padding: '10px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc', textTransform: 'uppercase' }}
+        />
+        <button 
+          onClick={() => setActiveTicker(searchInput)}
+          style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
+        >
+          Search
+        </button>
       </div>
       
-      <p style={{ marginTop: '20px', fontSize: '0.9em', color: '#666' }}>
-        Data retrieved at: {new Date(signalData.timestamp).toLocaleTimeString()}
-      </p>
+      {/* We check if chartData exists before trying to render the title or chart */}
+      {chartData && (
+        <>
+          <h2>{chartData.ticker} - 1 Year History</h2>
+          
+          <div style={{ height: '400px', width: '100%', background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData.data}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e0e0e0" />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} tickMargin={10} minTickGap={30} />
+                <YAxis domain={['auto', 'auto']} tick={{ fontSize: 12 }} tickFormatter={(value) => `$${value}`} />
+                <Tooltip formatter={(value) => [`$${value}`, 'Close Price']} labelStyle={{ color: '#333', fontWeight: 'bold' }} />
+                <Line type="monotone" dataKey="close" stroke="#2563eb" strokeWidth={3} dot={false} activeDot={{ r: 8 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
     </div>
   )
 }
