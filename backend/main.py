@@ -1,7 +1,20 @@
 from fastapi import FastAPI, HTTPException
-import yfinance as yf
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Query
 from datetime import datetime
+import yfinance as yf
+import pandas as pd
+import os
+import json
+import time
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
+from duckduckgo_search import DDGS
+
+# Load the secret API key from the .env file
+load_dotenv()
+# client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # 1. Initialize the App
 # This is the core application object. It handles all incoming traffic.
@@ -29,42 +42,146 @@ async def root():
     return {"message": "Stock Predictor API is online. Go to /docs to test endpoints."}
 
 # --- UPGRADED YFINANCE ROUTE ---
-@app.get("/api/v1/chart/{ticker}")
-async def get_chart_data(ticker: str):
-    """Returns real historical OHLCV data for the charts using yfinance."""
+@app.get("/api/v1/quote/{ticker}")
+async def get_live_quote(ticker: str):
+    """Fetches live intraday price, explicitly including after-hours trading."""
+    ticker_upper = ticker.upper()
+    current_time = time.time()
+    
+    # 1. Check Cache
+    if ticker_upper in quote_cache:
+        last_fetch_time, cached_data = quote_cache[ticker_upper]
+        if current_time - last_fetch_time < CACHE_TTL:
+            return cached_data
+
     try:
-        # 1. Fetch the data from Yahoo Finance
-        stock = yf.Ticker(ticker)
-        # Pull 1 year of daily data
-        hist = stock.history(period="1y", interval="1d") 
+        stock = yf.Ticker(ticker_upper)
         
-        # 2. Safety check: Did we get valid data?
-        if hist.empty:
-            raise HTTPException(status_code=404, detail=f"No data found for ticker {ticker}. It may be delisted or invalid.")
+        # 2. Get the official previous close (extremely fast method)
+        try:
+            previous_close = stock.fast_info['previous_close']
+        except:
+            # Fallback if fast_info is unavailable
+            daily_hist = stock.history(period="5d")
+            previous_close = daily_hist['Close'].iloc[-2] if len(daily_hist) >= 2 else daily_hist['Open'].iloc[0]
 
-        # 3. Format the Pandas DataFrame into our agreed-upon JSON structure
-        # We wrap the values in float() and int() to strip away the pandas/numpy datatypes
-        formatted_data = []
-        for index, row in hist.iterrows():
-            formatted_data.append({
-                "date": index.strftime("%Y-%m-%d"),
-                "open": float(round(row["Open"], 2)),
-                "high": float(round(row["High"], 2)),
-                "low": float(round(row["Low"], 2)),
-                "close": float(round(row["Close"], 2)),
-                "volume": int(row["Volume"])
-            })
-
-        return {
-            "ticker": ticker.upper(),
-            "interval": "1d",
-            "data": formatted_data
+        # 3. Get the TRUE live price using 1-minute intervals and prepost=True
+        live_hist = stock.history(period="1d", interval="1m", prepost=True)
+        if live_hist.empty:
+            current_price = previous_close
+        else:
+            current_price = live_hist['Close'].iloc[-1]
+            
+        change = current_price - previous_close
+        change_pct = (change / previous_close) * 100
+        
+        fresh_data = {
+            "ticker": ticker_upper,
+            "price": float(current_price),
+            "change": float(change),
+            "changePct": float(change_pct)
         }
+        
+        quote_cache[ticker_upper] = (current_time, fresh_data)
+        return fresh_data
+        
     except Exception as e:
-        # If anything goes wrong with the yfinance network request, catch it gracefully
+        print(f"Quote Error for {ticker}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- MOCK ROUTES (We will upgrade these next) ---
+
+@app.get("/api/v1/chart/{ticker}")
+async def get_chart_data(ticker: str, timeframe: str = Query("1D")): # Defaulted to 1D
+    """Fetches historical price data mapped to specific timeframes, including extended hours."""
+    try:
+        stock = yf.Ticker(ticker)
+        
+        timeframe_map = {
+            "1D": {"period": "1d", "interval": "1m"}, # Upgraded to 1m resolution for 1D chart
+            "1W": {"period": "5d", "interval": "15m"},
+            "1M": {"period": "1mo", "interval": "1d"},
+            "3M": {"period": "3mo", "interval": "1d"},
+            "1Y": {"period": "1y", "interval": "1d"},
+            "ALL": {"period": "max", "interval": "1wk"}
+        }
+        
+        tf_settings = timeframe_map.get(timeframe.upper(), timeframe_map["1D"])
+        
+        # CRITICAL: Added prepost=True so the chart plots after-hours data!
+        hist = stock.history(period=tf_settings["period"], interval=tf_settings["interval"], prepost=True)
+        
+        if hist.empty:
+             return {"ticker": ticker.upper(), "data": []}
+             
+        chart_data = []
+        for date, row in hist.iterrows():
+            if tf_settings["interval"] in ["1m", "5m", "15m"]:
+                date_str = date.strftime("%I:%M %p") 
+            elif tf_settings["interval"] == "1wk":
+                date_str = date.strftime("%b %Y")    
+            else:
+                date_str = date.strftime("%b %d")    
+                
+            chart_data.append({
+                "date": date_str,
+                "close": round(row['Close'], 2)
+            })
+            
+        return {"ticker": ticker.upper(), "timeframe": timeframe, "data": chart_data}
+        
+    except Exception as e:
+        print(f"Chart Error for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 1. Create a memory cache and set the limit to 10 seconds
+quote_cache = {}
+CACHE_TTL = 10 
+
+@app.get("/api/v1/quote/{ticker}")
+async def get_live_quote(ticker: str):
+    """Fetches live intraday price with a 10-second safety cache."""
+    ticker_upper = ticker.upper()
+    current_time = time.time()
+    
+    # 2. Safety Check: If we fetched this stock less than 10 seconds ago, return the saved price instantly!
+    if ticker_upper in quote_cache:
+        last_fetch_time, cached_data = quote_cache[ticker_upper]
+        if current_time - last_fetch_time < CACHE_TTL:
+            return cached_data
+
+    try:
+        # 3. If the cache is old, ping Yahoo Finance for fresh data
+        stock = yf.Ticker(ticker_upper)
+        hist = stock.history(period="5d") 
+        if hist.empty:
+            raise ValueError(f"No price data found for {ticker_upper}.")
+            
+        current_price = hist['Close'].iloc[-1]
+        
+        if len(hist) >= 2:
+            previous_close = hist['Close'].iloc[-2]
+        else:
+            previous_close = hist['Open'].iloc[0]
+            
+        change = current_price - previous_close
+        change_pct = (change / previous_close) * 100
+        
+        fresh_data = {
+            "ticker": ticker_upper,
+            "price": float(current_price),
+            "change": float(change),
+            "changePct": float(change_pct)
+        }
+        
+        # 4. Save the fresh data to the cache so the next rapid-fire request doesn't hit Yahoo
+        quote_cache[ticker_upper] = (current_time, fresh_data)
+        
+        return fresh_data
+        
+    except Exception as e:
+        print(f"Quote Error for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/v1/signals/{ticker}")
 async def get_technical_signals(ticker: str):
     """Calculates live technical indicators and generates a Buy/Sell signal using pure Pandas."""
@@ -148,10 +265,89 @@ async def get_technical_signals(ticker: str):
 
 @app.get("/api/v1/insights/{ticker}")
 async def get_ai_insights(ticker: str):
-    return {
-        "ticker": ticker.upper(),
-        "generated_at": datetime.utcnow().isoformat(),
-        "sentiment": {"score": 0.65, "label": "Moderately Bullish"},
-        "executive_summary": "Technical indicators suggest a strong entry point following a recent pullback.",
-        "key_drivers": ["RSI approaching oversold", "Positive upcoming event sentiment", "Macroeconomic chip pressures"]
-    }
+    """Fetches real-time web/regulatory data and forces a structural macro analysis from Gemini."""
+    try:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("API Key missing in environment.")
+
+        # 1. Scrape comprehensive web text (capturing news, regulatory actions, and macro context)
+        news_items = []
+        try:
+            with DDGS() as ddgs:
+                # Searching for stock specific catalysts, federal updates, or earnings news
+                results = ddgs.text(f"{ticker} stock government regulatory earnings catalyst news", max_results=6)
+                if results:
+                    for r in results:
+                        title = r.get("title", "")
+                        body = r.get("body", "")
+                        if title and body:
+                            news_items.append(f"Title: {title}\nSnippet: {body}\n---")
+        except Exception as e:
+            print(f"Search failure for {ticker}: {e}")
+
+        # 2. Initialize the modern Gemini Client
+        client = genai.Client()
+
+        # 3. Structural Prompt Engineering
+        if not news_items:
+            prompt = f"""
+            You are an institutional equity research analyst. Analyze the long-term fundamentals of {ticker.upper()}.
+            CRITICAL: Provide concrete structural drivers. Do not use generic statements like '{ticker.upper()} is strong'. 
+            Tie your analysis to specific industry barriers to entry, sovereign policy/subsidies, or known supply chain dynamics.
+            """
+        else:
+            context_data = "\n".join(news_items)
+            prompt = f"""
+            You are an institutional equity research analyst. Conduct a granular catalyst-based analysis for {ticker.upper()} using these recent developments and macro updates:
+            
+            {context_data}
+            
+            CRITICAL INSTRUCTIONS:
+            - Absolutely BAN generic filler sentences (e.g., "The company is performing well" or "X is a strong leader").
+            - Every insight in 'catalysts' must tie a specific action (e.g., interest rate shifts, government spending bills, product launches, anti-trust reviews, or earnings surprises) directly to a market outcome.
+            - Ensure statements follow an 'Event -> Causal Impact' structure.
+            """
+
+        # 4. Enforce a structured, event-driven schema
+        schema_instructions = f"""
+        Return ONLY a raw, valid JSON object matching this exact schema. Do not wrap in markdown or markdown code blocks.
+        {{
+          "ticker": "{ticker.upper()}",
+          "generated_at": "{datetime.utcnow().isoformat()}",
+          "market_thesis": {{
+            "sentiment_label": "<Bullish, Neutral, or Bearish>",
+            "confidence_score": <float between 0.0 and 1.0>,
+            "structural_outlook": "<A deep 2-sentence structural synthesis of why the company is positioned this way based on macroeconomic environments or competitive moats>"
+          }},
+          "critical_events": [
+            {{
+              "event_type": "<e.g., Government/Regulatory, Corporate Update, Macroeconomic, Earnings>",
+              "description": "<What actually happened based on data>",
+              "impact_analysis": "<How this directly changes cost of capital, margins, or addressable market size>"
+            }}
+          ]
+        }}
+        """
+
+        # 5. Call the model
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt + schema_instructions,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+            )
+        )
+
+        # 6. Clean and parse output
+        raw_text = response.text.strip()
+        if raw_text.startswith("```json"):
+            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+        elif raw_text.startswith("```"):
+            raw_text = raw_text.replace("```", "").strip()
+
+        return json.loads(raw_text)
+
+    except Exception as e:
+        print(f"BACKEND ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

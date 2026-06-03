@@ -6,7 +6,7 @@
   "scripts": {
     "start:backend": "cd backend && venv\\Scripts\\python.exe -m uvicorn main:app --reload",
     "start:frontend": "cd frontend && npm run dev",
-    "dev": "concurrently \"npm run start:backend\" \"npm run start:frontend\""
+    "dev": "concurrently --no-stdin \"npm run start:frontend\" \"npm run start:backend\""
   },
   "repository": {
     "type": "git",
