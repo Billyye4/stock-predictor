@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import styles from './App.module.css';
+import Settings from './Settings';
 
 const Icons = {
   TrendingUp: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg>,
   Target: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>,
   Alert: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>,
   X: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
-  Clock: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+  Clock: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>,
+  Settings: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
 };
 
 // --- NEW: Universal Formatting Engines ---
@@ -23,6 +25,7 @@ const formatDelta = (value, percent) => {
 };
 
 export default function App() {
+  const [showSettings, setShowSettings] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedTicker, setSelectedTicker] = useState('PORTFOLIO');
   const [timeframe, setTimeframe] = useState('1D');
@@ -53,7 +56,14 @@ export default function App() {
     return savedInsights ? JSON.parse(savedInsights) : {};
   });
   const [isGenerating, setIsGenerating] = useState(false);
+  const [insightError, setInsightError] = useState(null); // <--- NEW: Track backend errors
 
+  // <--- NEW: Clear the error if they click a different stock
+  useEffect(() => {
+    setInsightError(null);
+  }, [selectedTicker]);
+
+  
   useEffect(() => localStorage.setItem('dashboard_portfolio', JSON.stringify(portfolio)), [portfolio]);
   useEffect(() => localStorage.setItem('dashboard_insights', JSON.stringify(insights)), [insights]);
   useEffect(() => localStorage.setItem('dashboard_cash', uninvestedCash.toString()), [uninvestedCash]);
@@ -98,15 +108,45 @@ export default function App() {
     return () => clearInterval(jitterTimer);
   }, []);
 
-  const fetchNewInsight = async (tickerToFetch) => {
+const fetchNewInsight = async (tickerToFetch) => {
+    const userApiKey = localStorage.getItem('stock_api_key');
+
+    if (!userApiKey) {
+      alert("Please go to Settings and enter your API key first!");
+      return; 
+    }
+
     setIsGenerating(true);
+    setInsightError(null); // Reset any previous errors
+
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/insights/${tickerToFetch}`);
-      if(res.ok) {
+      const res = await fetch(`http://localhost:8000/api/v1/insights/${tickerToFetch}`, {
+        method: 'GET', 
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': userApiKey 
+        }
+      });
+
+      if (res.ok) {
         const data = await res.json();
         setInsights(prev => ({ ...prev, [tickerToFetch]: data }));
+      } else {
+        // --- NEW: Handle Backend Errors ---
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.detail || "";
+        
+        // Check if it's the specific high-demand 503 error
+        if (res.status === 503 || errorMessage.includes('503 UNAVAILABLE')) {
+          setInsightError("Gemini is currently experiencing high demand. Please try again in a few moments.");
+        } else {
+          setInsightError(errorMessage || `Server Error ${res.status}: Failed to generate insight.`);
+        }
       }
-    } catch (err) {} finally {
+    } catch (err) {
+      setInsightError("Network Error: Could not connect to the Python backend.");
+      console.error(err);
+    } finally {
       setIsGenerating(false);
     }
   };
@@ -234,9 +274,18 @@ export default function App() {
     <div className={styles.dashboardContainer}>
       
       <aside className={styles.portfolioSidebar}>
-        <div className={styles.sidebarHeader}>
-          <h1 className={styles.sidebarTitle}>Stocks Dashboard</h1>
-          <p className={styles.sidebarSub}>Track your portfolio</p>
+        <div className={styles.sidebarHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 className={styles.sidebarTitle}>Stocks Dashboard</h1>
+            <p className={styles.sidebarSub}>Track your portfolio</p>
+          </div>
+          <button 
+            onClick={() => setShowSettings(!showSettings)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex' }}
+            title="Open Settings"
+          >
+            <Icons.Settings />
+          </button>
         </div>
 
         <div className={styles.valueCardContainer}>
@@ -342,7 +391,27 @@ export default function App() {
           </div>
         </header>
 
-        {(activeStock || isPortfolio) ? (
+        {/* --- SETTINGS SCREEN INJECTION --- */}
+        {showSettings ? (
+          <div className={styles.settingsWrapper}>
+            <div className={styles.settingsCard}>
+              
+              <div className={styles.settingsHeader}>
+                <h2 className={styles.settingsTitle}>Application Settings</h2>
+                <button 
+                  onClick={() => setShowSettings(false)} 
+                  className={styles.settingsCloseBtn}
+                >
+                  Close
+                </button>
+              </div>
+
+              <Settings />
+              
+            </div>
+          </div>
+          
+        ) : (activeStock || isPortfolio) ? (
           <div className={styles.chartWorkspace}>
             <div className={styles.workspaceHeader}>
               <div>
@@ -354,7 +423,6 @@ export default function App() {
                 </div>
               </div>
               
-              {/* --- UPDATED: Active Workspace Header Prices --- */}
               <div className={styles.headerMetricsRight}>
                 <div className={styles.activePriceValue}>
                   ${isPortfolio 
@@ -384,7 +452,6 @@ export default function App() {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                     <XAxis dataKey="date" hide />
                     
-                    {/* --- UPDATED: Y-Axis and Chart Tooltips formatting --- */}
                     <YAxis domain={['auto', 'auto']} tick={{ fill: '#64748b', fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(val) => `$${formatPrice(val)}`} />
                     <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} formatter={(value) => [`$${formatPrice(value)}`, 'Price']} />
                     
@@ -402,84 +469,165 @@ export default function App() {
         )}
       </main>
 
+      {/* ================= RIGHT SIDEBAR: AI INSIGHTS ================= */}
       <aside className={styles.insightsSidebar}>
-        <div className={styles.insightsTopBar}>
-          {(!isPortfolio && activeStock) && (
-            <button className={styles.refreshButton} onClick={() => fetchNewInsight(selectedTicker)} disabled={isGenerating}>
+        
+        {/* --- MERGED HEADER & REFRESH BUTTON --- */}
+        <div className={styles.sidebarHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0' }}>
+          <div>
+            <h3 className={styles.sidebarTitle}>AI Market Insights</h3>
+            <p className={styles.sidebarSub}>
+              {selectedTicker === 'PORTFOLIO' ? 'Aggregate Portfolio Review' : `${selectedTicker} Asset Analysis`}
+            </p>
+          </div>
+          
+          {(activeStock || isPortfolio) && (
+            <button 
+              className={styles.refreshButton} 
+              onClick={() => fetchNewInsight(selectedTicker || 'PORTFOLIO')} 
+              disabled={isGenerating}
+              style={{ margin: 0 }} /* Overrides the old auto-margin */
+            >
               {isGenerating ? 'Analyzing...' : 'Refresh'}
             </button>
           )}
         </div>
 
         <div className={styles.insightsContent}>
-          {(activeStock || isPortfolio) ? (
-            <div className={styles.insightsCard}>
+          {/* Active Generation State */}
+          {isGenerating ? (
+            <div className={styles.centerLoadingState} style={{ minHeight: '200px' }}>
+              Synthesizing market catalysts...
+            </div>
+          ) : insightError ? (
+            /* Error State */
+            <div className={styles.centerLoadingState} style={{ minHeight: '200px', flexDirection: 'column', color: '#ef4444', textAlign: 'center', padding: '0 20px' }}>
+              <Icons.Alert />
+              <div style={{ fontWeight: '700', marginTop: '12px', color: '#0f172a' }}>AI Service Unavailable</div>
+              <div style={{ fontSize: '13px', marginTop: '8px', lineHeight: '1.5', color: '#64748b' }}>
+                {insightError}
+              </div>
+              <button 
+                onClick={() => fetchNewInsight(selectedTicker || 'PORTFOLIO')}
+                style={{ marginTop: '16px', background: '#f1f5f9', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', color: '#475569' }}
+              >
+                Try Again
+              </button>
+            </div>
+          ) : activeInsight ? (
+            /* Content State (Only renders if AI data actually exists!) */
+            <div className={styles.insightsStack}>
               
-              <h3 className={styles.insightsHeader}>
-                <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-                  <span className={styles.insightSparkle}>✦</span> AI Insights for {selectedTicker}
-                </div>
-              </h3>
+              {!selectedTicker || selectedTicker === 'PORTFOLIO' ? (
+                /* ---------------------------------------------------- */
+                /* ROW A: DETAILED PORTFOLIO OVERVIEW INSIGHTS          */
+                /* ---------------------------------------------------- */
+                <>
+                  {/* 1. Macro Allocation */}
+                  <div className={styles.insightBlock}>
+                    <div className={`${styles.iconWrapper} ${styles.sentimentIcon}`}><Icons.TrendingUp /></div>
+                    <div>
+                      <h4 className={styles.insightHeading}>Macro Environment & Liquidity</h4>
+                      <p className={styles.insightText}>
+                        {activeInsight?.macro_allocation || `Your capital is distributed across ${portfolio.length} active equities with a cash buffer of $${formatPrice(uninvestedCash)}.`}
+                      </p>
+                    </div>
+                  </div>
 
-              {isGenerating && !activeInsight ? (
-                <div className={styles.centerLoadingState} style={{minHeight: '200px'}}>Synthesizing market catalysts...</div>
+                  {/* 2. Diversification & Risk */}
+                  <div className={styles.insightBlock}>
+                    <div className={`${styles.iconWrapper} ${styles.riskIcon}`}><Icons.Alert /></div>
+                    <div>
+                      <h4 className={styles.insightHeading}>Risk Concentration Vectors</h4>
+                      <p className={styles.insightText}>
+                        {activeInsight?.risk_concentration || 'Analyzing current market risks and sector headwinds...'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 3. Rebalancing Strategy */}
+                  <div className={styles.insightBlock}>
+                    <div className={`${styles.iconWrapper} ${styles.analysisIcon}`}><Icons.Target /></div>
+                    <div>
+                      <h4 className={styles.insightHeading}>Strategic Rebalancing</h4>
+                      <p className={styles.insightText}>
+                        {activeInsight?.rebalancing_strategy || 'Generating actionable portfolio rebalancing strategies...'}
+                      </p>
+                    </div>
+                  </div>
+                </>
               ) : (
-                <div className={styles.insightsStack}>
-                
-                {isPortfolio ? (
-                  <>
-                    <div className={styles.insightBlock}>
-                      <div className={`${styles.iconWrapper} ${styles.sentimentIcon}`}><Icons.TrendingUp /></div>
-                      <div>
-                        <h4 className={styles.insightHeading}>Macro Allocation</h4>
-                        {/* --- UPDATED: Insights Cash Formatting --- */}
-                        <p className={styles.insightText}>Your portfolio is currently distributed across {portfolio.length} active equities with a cash buffer of ${formatPrice(uninvestedCash)}. Uninvested cash provides liquidity to capitalize on immediate market retracements.</p>
-                      </div>
+                /* ---------------------------------------------------- */
+                /* ROW B: HIGH-CONVICTION INDIVIDUAL STOCK INSIGHTS     */
+                /* ---------------------------------------------------- */
+                <>
+                  {/* 1. Sentiment & Movement */}
+                  <div className={styles.insightBlock}>
+                    <div className={`${styles.iconWrapper} ${styles.sentimentIcon}`}><Icons.TrendingUp /></div>
+                    <div>
+                      <h4 className={styles.insightHeading}>Wall Street Sentiment: {activeInsight?.sentiment?.label || 'Neutral'}</h4>
+                      <p className={styles.insightText}>
+                        <strong>Catalyst:</strong> {activeInsight?.sentiment?.catalyst_summary || 'Analyzing current market catalysts...'}<br/>
+                        <strong>Consensus:</strong> {activeInsight?.sentiment?.wall_street_consensus || 'Gathering institutional consensus data...'}
+                      </p>
                     </div>
-                    <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                      <div className={`${styles.iconWrapper} ${styles.analysisIcon}`}><Icons.Target /></div>
-                      <div>
-                        <h4 className={styles.insightHeading}>Performance Vectors</h4>
-                        <p className={styles.insightText}>Your holdings are tracking general market momentum. Consider rebalancing if a single sector exceeds 40% of total equity weight.</p>
-                      </div>
+                  </div>
+
+                  {/* 2. Health & Valuation */}
+                  <div className={styles.insightBlock}>
+                    <div className={`${styles.iconWrapper} ${styles.analysisIcon}`}><Icons.Target /></div>
+                    <div>
+                      <h4 className={styles.insightHeading}>Business Health & Valuation</h4>
+                      <p className={styles.insightText}>
+                        <strong>Health:</strong> {activeInsight?.fundamentals?.business_health || 'Analyzing fundamental metrics...'}<br/>
+                        <strong>Valuation:</strong> {activeInsight?.fundamentals?.valuation_status || 'Evaluating historical pricing multiples...'}
+                      </p>
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <div className={styles.insightBlock}>
-                      <div className={`${styles.iconWrapper} ${styles.sentimentIcon}`}><Icons.TrendingUp /></div>
-                      <div>
-                        <h4 className={styles.insightHeading}>Market Sentiment</h4>
-                        <p className={styles.insightText}>{activeInsight?.market_thesis?.structural_outlook || `${selectedTicker} operations show steady positioning relative to core sector momentum.`}</p>
-                      </div>
+                  </div>
+
+                  {/* 3. Actionable Strategy & Scenarios */}
+                  <div className={styles.insightBlock}>
+                    <div className={`${styles.iconWrapper} ${styles.riskIcon}`}><Icons.Alert /></div>
+                    <div>
+                      <h4 className={styles.insightHeading}>Trading Strategy & Levels</h4>
+                      <p className={styles.insightText}>
+                        <strong>Buy Zone:</strong> {activeInsight?.strategy?.buy_zone || 'Calculating institutional support areas...'}<br/>
+                        <strong>Sell Zone:</strong> {activeInsight?.strategy?.sell_zone || 'Identifying overhead resistance zones...'}<br/>
+                        <span style={{ color: '#10b981', fontWeight: '600' }}>↑ Bull Target:</span> {activeInsight?.strategy?.bull_scenario || 'N/A'}<br/>
+                        <span style={{ color: '#ef4444', fontWeight: '600' }}>↓ Bear Support:</span> {activeInsight?.strategy?.bear_scenario || 'N/A'}
+                      </p>
                     </div>
-                    <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                      <div className={`${styles.iconWrapper} ${styles.analysisIcon}`}><Icons.Target /></div>
-                      <div>
-                        <h4 className={styles.insightHeading}>Price Analysis</h4>
-                        <p className={styles.insightText}>{activeInsight?.critical_events?.[0]?.impact_analysis || `Current price is interacting with moving averages.`}</p>
-                      </div>
+                  </div>
+
+                  {/* 4. Competitor Analysis */}
+                  <div className={styles.insightBlock}>
+                    <div className={`${styles.iconWrapper}`} style={{ backgroundColor: '#f1f5f9', color: '#475569' }}><Icons.Target /></div>
+                    <div>
+                      <h4 className={styles.insightHeading}>Top Competitor Threats</h4>
+                      {activeInsight?.competition && activeInsight.competition.length > 0 ? (
+                        activeInsight.competition.map((comp, idx) => (
+                          <p key={idx} className={styles.insightText} style={{ marginBottom: '6px' }}>
+                            <strong>{comp.competitor} ({comp.threat_level} Threat):</strong> {comp.comparative_advantage}
+                          </p>
+                        ))
+                      ) : (
+                        <p className={styles.insightText}>Scanning competitive landscape and industry moats...</p>
+                      )}
                     </div>
-                    <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                      <div className={`${styles.iconWrapper} ${styles.riskIcon}`}><Icons.Alert /></div>
-                      <div>
-                        <h4 className={styles.insightHeading}>Risk Assessment</h4>
-                        <p className={styles.insightText}>{activeInsight?.critical_events?.[1]?.description || `Volatility is moderate. Consider long-term holding strategies.`}</p>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
+                  </div>
+                </>
               )}
-              <div className={styles.insightsFooter}>
-                ✦ Insights powered by Gemini AI • Updated in real-time
-              </div>
             </div>
           ) : (
-            <div className={styles.insightsCard} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ color: '#64748b' }}>No data to analyze.</span>
+            /* Initial / Empty State */
+            <div className={styles.centerLoadingState} style={{ minHeight: '200px' }}>
+              Click 'Refresh' to generate an AI analysis.
             </div>
           )}
+        </div>
+
+        <div className={styles.insightsFooter}>
+          ✦ Insights powered by Gemini AI • Updated in real-time
         </div>
       </aside>
     </div>

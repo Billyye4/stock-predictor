@@ -2,11 +2,13 @@
   "name": "stock-predictor",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "electron-main.js",
   "scripts": {
-    "start:backend": "cd backend && venv\\Scripts\\python.exe -m uvicorn main:app --reload",
+    "start:backend": "cd backend && ..\\venv\\Scripts\\python.exe -m uvicorn main:app --reload",
     "start:frontend": "cd frontend && npm run dev",
-    "dev": "concurrently --no-stdin \"npm run start:frontend\" \"npm run start:backend\""
+    "start:electron": "electron .",
+    "dev": "concurrently --no-stdin \"npm run start:frontend\" \"npm run start:backend\"",
+    "desktop": "concurrently --no-stdin \"npm run start:backend\" \"npm run start:frontend\" \"npm run start:electron\""
   },
   "repository": {
     "type": "git",
@@ -21,6 +23,7 @@
   },
   "homepage": "https://github.com/Billyye4/stock-predictor#readme",
   "devDependencies": {
-    "concurrently": "^10.0.0"
+    "concurrently": "^10.0.0",
+    "electron": "^42.3.3"
   }
 }

@@ -7,6 +7,7 @@
   height: 100vh;
   background-color: #f8fafc;
   font-family: "Inter", -apple-system, sans-serif;
+  overflow: hidden; /* <--- NEW: Locks the entire app to the exact window size */
 }
 
 /* ================= LEFT SIDEBAR ================= */
@@ -15,6 +16,7 @@
   background-color: #ffffff;
   display: flex;
   flex-direction: column;
+  overflow: hidden; /* <--- NEW */
 }
 
 .sidebarHeader {
@@ -264,7 +266,7 @@
 .mainCanvas {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: hidden; /* <--- NEW */
 }
 
 .topStatusBar {
@@ -406,7 +408,8 @@
   background-color: #f8fafc;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid #e2e8f0; /* Adds a crisp vertical separator line */
+  border-left: 1px solid #e2e8f0;
+  overflow: hidden; /* <--- NEW */
 }
 
 /* --- NEW: The missing top right navigation bar --- */
@@ -588,4 +591,180 @@
 
 .cancelButton:hover {
   background: #cbd5e1;
+}
+
+/* ========================================== */
+/* SETTINGS PAGE STYLES                       */
+/* ========================================== */
+
+.sidebarSettingsBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  color: #64748b;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.sidebarSettingsBtn:hover {
+  color: #0f172a;
+  transform: rotate(45deg); /* A nice little gear spin effect */
+}
+
+.settingsWrapper {
+  padding: 40px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  height: 100%;
+  background-color: #f8fafc;
+}
+
+.settingsCard {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 30px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+}
+
+.settingsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.settingsTitle {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #0f172a;
+}
+
+.settingsCloseBtn {
+  background-color: #f1f5f9;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  color: #475569;
+  transition: background-color 0.2s ease;
+}
+
+.settingsCloseBtn:hover {
+  background-color: #e2e8f0;
+}
+
+/* --- Settings Form Elements --- */
+.settingsForm {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settingsFieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settingsLabel {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.settingsHelperText {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0 0 4px 0;
+}
+
+.settingsInput {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+  background-color: #f8fafc;
+  box-sizing: border-box;
+}
+
+.settingsInput:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  background-color: #ffffff;
+}
+
+.settingsSubmitBtn {
+  background-color: #2563eb;
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.settingsSubmitBtn:hover {
+  background-color: #1d4ed8;
+}
+
+.successBadge {
+  background-color: #d1fae5;
+  color: #047857;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: slideDown 0.3s ease forwards;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ========================================== */
+/* CUSTOM NATIVE SCROLLBARS                   */
+/* ========================================== */
+
+.stockList::-webkit-scrollbar,
+.insightsContent::-webkit-scrollbar,
+.settingsWrapper::-webkit-scrollbar {
+  width: 6px;
+}
+
+.stockList::-webkit-scrollbar-track,
+.insightsContent::-webkit-scrollbar-track,
+.settingsWrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.stockList::-webkit-scrollbar-thumb,
+.insightsContent::-webkit-scrollbar-thumb,
+.settingsWrapper::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 10px;
+}
+
+.stockList::-webkit-scrollbar-thumb:hover,
+.insightsContent::-webkit-scrollbar-thumb:hover,
+.settingsWrapper::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
 }

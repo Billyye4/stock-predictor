@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Query
 from datetime import datetime
@@ -264,82 +264,108 @@ async def get_technical_signals(ticker: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/insights/{ticker}")
-async def get_ai_insights(ticker: str):
-    """Fetches real-time web/regulatory data and forces a structural macro analysis from Gemini."""
+async def get_ai_insights(
+    ticker: str,
+    x_api_key: str | None = Header(default=None)
+):
     try:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("API Key missing in environment.")
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="API Key missing. Please set it in the app settings.")
 
-        # 1. Scrape comprehensive web text (capturing news, regulatory actions, and macro context)
+        client = genai.Client(api_key=x_api_key)
         news_items = []
-        try:
-            with DDGS() as ddgs:
-                # Searching for stock specific catalysts, federal updates, or earnings news
-                results = ddgs.text(f"{ticker} stock government regulatory earnings catalyst news", max_results=6)
-                if results:
-                    for r in results:
-                        title = r.get("title", "")
-                        body = r.get("body", "")
-                        if title and body:
-                            news_items.append(f"Title: {title}\nSnippet: {body}\n---")
-        except Exception as e:
-            print(f"Search failure for {ticker}: {e}")
+        is_portfolio = ticker.upper() == "PORTFOLIO"
 
-        # 2. Initialize the modern Gemini Client
-        client = genai.Client()
+        # ==========================================
+        # PATH A: PORTFOLIO / MACRO ANALYSIS
+        # ==========================================
+        if is_portfolio:
+            try:
+                with DDGS() as ddgs:
+                    # Search for broad market/economy news instead of a specific stock
+                    results = ddgs.text("stock market macro economy federal reserve interest rates news", max_results=5)
+                    if results:
+                        for r in results:
+                            news_items.append(f"Title: {r.get('title', '')}\nSnippet: {r.get('body', '')}\n---")
+            except Exception as e:
+                print(f"Macro search failure: {e}")
 
-        # 3. Structural Prompt Engineering
-        if not news_items:
+            context_data = "\n".join(news_items) if news_items else "No immediate news. Rely on internal macro knowledge."
+            
             prompt = f"""
-            You are an institutional equity research analyst. Analyze the long-term fundamentals of {ticker.upper()}.
-            CRITICAL: Provide concrete structural drivers. Do not use generic statements like '{ticker.upper()} is strong'. 
-            Tie your analysis to specific industry barriers to entry, sovereign policy/subsidies, or known supply chain dynamics.
+            You are a Chief Investment Officer. Provide a broad macroeconomic analysis of the current stock market environment.
+            Context: {context_data}
             """
+            
+            schema_instructions = """
+            Return ONLY a raw, valid JSON object matching this exact schema. Do not wrap in markdown.
+            {
+              "analysis_type": "portfolio",
+              "macro_allocation": "<A 2-sentence analysis of the current market environment and whether cash/liquidity is valuable right now.>",
+              "risk_concentration": "<A 2-sentence analysis of current broader market risks, sector headwinds, or volatility.>",
+              "rebalancing_strategy": "<Specific advice on what asset classes or sectors to accumulate, trim, or avoid right now.>"
+            }
+            """
+
+        # ==========================================
+        # PATH B: SINGLE STOCK ANALYSIS
+        # ==========================================
         else:
-            context_data = "\n".join(news_items)
+            try:
+                with DDGS() as ddgs:
+                    results = ddgs.text(f"{ticker} stock government regulatory earnings catalyst news", max_results=5)
+                    if results:
+                        for r in results:
+                            news_items.append(f"Title: {r.get('title', '')}\nSnippet: {r.get('body', '')}\n---")
+            except Exception as e:
+                print(f"Search failure for {ticker}: {e}")
+
+            context_data = "\n".join(news_items) if news_items else "No immediate news. Rely on internal knowledge."
+            
             prompt = f"""
-            You are an institutional equity research analyst. Conduct a granular catalyst-based analysis for {ticker.upper()} using these recent developments and macro updates:
-            
-            {context_data}
-            
-            CRITICAL INSTRUCTIONS:
-            - Absolutely BAN generic filler sentences (e.g., "The company is performing well" or "X is a strong leader").
-            - Every insight in 'catalysts' must tie a specific action (e.g., interest rate shifts, government spending bills, product launches, anti-trust reviews, or earnings surprises) directly to a market outcome.
-            - Ensure statements follow an 'Event -> Causal Impact' structure.
+            You are an elite institutional equity research analyst. Conduct a granular, highly structured analysis for {ticker.upper()} using the provided context.
+            Recent Context: {context_data}
+            CRITICAL: Be concise, data-driven, and decisive.
             """
 
-        # 4. Enforce a structured, event-driven schema
-        schema_instructions = f"""
-        Return ONLY a raw, valid JSON object matching this exact schema. Do not wrap in markdown or markdown code blocks.
-        {{
-          "ticker": "{ticker.upper()}",
-          "generated_at": "{datetime.utcnow().isoformat()}",
-          "market_thesis": {{
-            "sentiment_label": "<Bullish, Neutral, or Bearish>",
-            "confidence_score": <float between 0.0 and 1.0>,
-            "structural_outlook": "<A deep 2-sentence structural synthesis of why the company is positioned this way based on macroeconomic environments or competitive moats>"
-          }},
-          "critical_events": [
+            schema_instructions = f"""
+            Return ONLY a raw, valid JSON object matching this exact schema. Do not wrap in markdown.
             {{
-              "event_type": "<e.g., Government/Regulatory, Corporate Update, Macroeconomic, Earnings>",
-              "description": "<What actually happened based on data>",
-              "impact_analysis": "<How this directly changes cost of capital, margins, or addressable market size>"
+              "ticker": "{ticker.upper()}",
+              "sentiment": {{
+                "label": "<Bullish, Neutral, Bearish>",
+                "wall_street_consensus": "<1 sentence on what institutions are saying right now>",
+                "catalyst_summary": "<1 sentence on exactly why the stock is currently moving>"
+              }},
+              "fundamentals": {{
+                "business_health": "<1 sentence on balance sheet strength, margins, and operational health>",
+                "valuation_status": "<Explicitly state if Cheap, Fairly Valued, or Overvalued, and why>"
+              }},
+              "competition": [
+                {{
+                  "competitor": "<Ticker>",
+                  "threat_level": "<High, Medium, Low>",
+                  "comparative_advantage": "<How they rival {ticker.upper()}>"
+                }}
+              ],
+              "strategy": {{
+                "buy_zone": "<Specific conditions or price levels for optimal entry>",
+                "sell_zone": "<Specific conditions or price levels for taking profit>",
+                "bull_scenario": "<What needs to happen for a breakout>",
+                "bear_scenario": "<What causes a breakdown>"
+              }}
             }}
-          ]
-        }}
-        """
+            """
 
-        # 5. Call the model
+        # ==========================================
+        # EXECUTE AND PARSE
+        # ==========================================
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt + schema_instructions,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-            )
+            config=types.GenerateContentConfig(response_mime_type="application/json")
         )
 
-        # 6. Clean and parse output
         raw_text = response.text.strip()
         if raw_text.startswith("```json"):
             raw_text = raw_text.replace("```json", "").replace("```", "").strip()
